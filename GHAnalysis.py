@@ -1,134 +1,113 @@
-import json
+# -*- coding: utf-8 -*-
+
 import os
 import argparse
+import pickle
+import re
 
-class Data:
-    def __init__(self, dict_address: int = None, reload: int = 0):
-        if reload == 1:
-            self.__init(dict_address)
-        if dict_address is None and not os.path.exists('1.json') and not os.path.exists('2.json') and not os.path.exists('3.json'):
-            raise RuntimeError('error: init failed')
-        x = open('1.json', 'r', encoding='utf-8').read()
-        self.__4Events4PerP = json.loads(x)
-        x = open('2.json', 'r', encoding='utf-8').read()
-        self.__4Events4PerR = json.loads(x)
-        x = open('3.json', 'r', encoding='utf-8').read()
-        self.__4Events4PerPPerR = json.loads(x)
+Events = ("PushEvent", "IssueCommentEvent", "IssuesEvent", "PullRequestEvent" )
+# 四种信息类型
+hipping = re.compile(r'"type":"(\w+?)".*?actor.*?"login":"(\S+?)".*?repo.*?"name":"(\S+?)"')
+# 使用正则表达式
 
-    def __init(self, dict_address: str):
-        json_list = []
-        for root, dic, files in os.walk(dict_address):
-            for f in files:
-                if f[-5:] == '.json':
-                    json_path = f
-                    x = open(dict_address+'\\'+json_path,
-                             'r', encoding='utf-8').read()
-                    str_list = [_x for _x in x.split('\n') if len(_x) > 0]
-                    for i, _str in enumerate(str_list):
-                        try:
-                            json_list.append(json.loads(_str))
-                        except:
-                            pass
-        records = self.__listOfNestedDict2ListOfDict(json_list)
-        self.__4Events4PerP = {}
-        self.__4Events4PerR = {}
-        self.__4Events4PerPPerR = {}
-        for i in records:
-            if not self.__4Events4PerP.get(i['actor__login'], 0):
-                self.__4Events4PerP.update({i['actor__login']: {}})
-                self.__4Events4PerPPerR.update({i['actor__login']: {}})
-            self.__4Events4PerP[i['actor__login']][i['type']
-                                         ] = self.__4Events4PerP[i['actor__login']].get(i['type'], 0)+1
-            if not self.__4Events4PerR.get(i['repo__name'], 0):
-                self.__4Events4PerR.update({i['repo__name']: {}})
-            self.__4Events4PerR[i['repo__name']][i['type']
-                                       ] = self.__4Events4PerR[i['repo__name']].get(i['type'], 0)+1
-            if not self.__4Events4PerPPerR[i['actor__login']].get(i['repo__name'], 0):
-                self.__4Events4PerPPerR[i['actor__login']].update({i['repo__name']: {}})
-            self.__4Events4PerPPerR[i['actor__login']][i['repo__name']][i['type']
-                                                          ] = self.__4Events4PerPPerR[i['actor__login']][i['repo__name']].get(i['type'], 0)+1
-        with open('1.json', 'w', encoding='utf-8') as f:
-            json.dump(self.__4Events4PerP,f)
-        with open('2.json', 'w', encoding='utf-8') as f:
-            json.dump(self.__4Events4PerR,f)
-        with open('3.json', 'w', encoding='utf-8') as f:
-            json.dump(self.__4Events4PerPPerR,f)
 
-    def __parseDict(self, d: dict, prefix: str):
-        _d = {}
-        for k in d.keys():
-            if str(type(d[k]))[-6:-2] == 'dict':
-                _d.update(self.__parseDict(d[k], k))
-            else:
-                _k = f'{prefix}__{k}' if prefix != '' else k
-                _d[_k] = d[k]
-        return _d
-
-    def __listOfNestedDict2ListOfDict(self, a: list):
-        records = []
-        for d in a:
-            _d = self.__parseDict(d, '')
-            records.append(_d)
+class inputData:
+    def __init__(self):
+        self.User = {}
+        self.Repo = {}
+        self.UserRepo = {}  # 初始化记录读取的内存
+    @staticmethod
+    def parse(file_path: str):
+        records = []  # 从json文件中逐行抽取信息存入空间
+        with open(file_path, 'r', encoding='utf-8') as f:  # 打开json文件
+            for line in f:
+                res = hipping.search(line)  # 运用正则表达式匹配有效数据
+                if res is None or res[1] not in Events:
+                    continue
+                records.append(res.groups())
         return records
 
-    def getEventsUsers(self, username: str, event: str) -> int:
-        if not self.__4Events4PerP.get(username,0):
-            return 0
-        else:
-            return self.__4Events4PerP[username].get(event,0)
+    def init(self, dirPath: str):
+        records = []
+        for curDir, subDir, filenames in os.walk(dirPath):
+            filenames = filter(lambda r: r.endswith('.json'), filenames)
+            for name in filenames:
+                # 将列表扩展拼合
+                records.extend(self.parse(f'{curDir}/{name}'))
 
-    def getEventsRepos(self, reponame: str, event: str) -> int:
-        if not self.__4Events4PerR.get(reponame,0):
-            return 0
-        else:
-            return self.__4Events4PerR[reponame].get(event,0)
+        for record in records:
+            event, user, repo = record
+            self.User.setdefault(user, {})
+            self.UserRepo.setdefault(user, {})
+            self.Repo.setdefault(repo, {})
+            self.UserRepo[user].setdefault(repo, {})
+            self.User[user][event] = self.User[user].get(event, 0)+1  # 如果不存在就初始化为0，存在就自身+1
+            self.Repo[repo][event] = self.Repo[repo].get(event, 0)+1
+            self.UserRepo[user][repo][event] = self.UserRepo[user][repo].get(event, 0)+1
+        with open('1.json', 'wb') as f:  # 字典转为字符串并将数据写入1、2、3.json
+            pickle.dump(self.User, f)
+        with open('2.json', 'wb') as f:
+            pickle.dump(self.Repo, f)
+        with open('3.json', 'wb') as f:
+            pickle.dump(self.UserRepo, f)
 
-    def getEventsUsersAndRepos(self, username: str, reponame: str, event: str) -> int:
-        if not self.__4Events4PerP.get(username,0):
-            return 0
-        elif not self.__4Events4PerPPerR[username].get(reponame,0):
-            return 0
-        else:
-            return self.__4Events4PerPPerR[username][reponame].get(event,0)
+    def load(self):
+        if not any((os.path.exists(f'{i}.json') for i in range(1, 3))):
+            raise RuntimeError('error: data file not found')
+
+        with open('1.json', 'rb') as f:
+            self.User = pickle.load(f)
+        with open('2.json', 'rb') as f:
+            self.Repo = pickle.load(f)
+        with open('3.json', 'rb') as f:
+            self.UserRepo = pickle.load(f)
+
+    def getUser(self, user: str, event: str) -> int:
+        return self.User.get(user, {}).get(event, 0)
+
+    def getRepo(self, repo: str, event: str) -> int:
+        return self.Repo.get(repo, {}).get(event, 0)
+
+    def getUserRepo(self, user: str, repo: str, event: str) -> int:
+        return self.UserRepo.get(user, {}).get(repo, {}).get(event, 0)
 
 
 class Run:
+    # 参数
     def __init__(self):
         self.parser = argparse.ArgumentParser()
         self.data = None
         self.argInit()
-        print(self.analyse())
 
     def argInit(self):
-        self.parser.add_argument('-i', '--init')
-        self.parser.add_argument('-u', '--user')
-        self.parser.add_argument('-r', '--repo')
-        self.parser.add_argument('-e', '--event')
+        self.parser.add_argument('-i', '--init', type=str)
+        self.parser.add_argument('-u', '--user', type=str)
+        self.parser.add_argument('-r', '--repo', type=str)
+        self.parser.add_argument('-e', '--event', type=str)
 
     def analyse(self):
-        if self.parser.parse_args().init:
-            self.data = Data(self.parser.parse_args().init, 1)
-            return 0
+        args = self.parser.parse_args()
+
+        self.data = inputData()
+        if args.init:
+            self.data.init(args.init)
+            return 'init done'
+        self.data.load()
+
+        if not args.event:
+            raise RuntimeError('error: the following arguments are required: -e/--event')
+        if not args.user and not args.repo:
+            raise RuntimeError('error: the following arguments are required: -u/--user or -r/--repo')
+
+        if args.user and args.repo:
+            res = self.data.getUserRepo(args.user, args.repo, args.event)
+        elif args.user:
+            res = self.data.getUser(args.user, args.event)
         else:
-            if self.data is None:
-                self.data = Data()
-            if self.parser.parse_args().event:
-                if self.parser.parse_args().user:
-                    if self.parser.parse_args().repo:
-                        res = self.data.getEventsUsersAndRepos(
-                            self.parser.parse_args().user, self.parser.parse_args().repo, self.parser.parse_args().event)
-                    else:
-                        res = self.data.getEventsUsers(
-                            self.parser.parse_args().user, self.parser.parse_args().event)
-                elif self.parser.parse_args().repo:
-                    res = self.data.getEventsRepos(
-                        self.parser.parse_args().reop, self.parser.parse_args().event)
-                else:
-                    raise RuntimeError('error: argument -l or -c are required')
-            else:
-                raise RuntimeError('error: argument -e is required')
+            res = self.data.getRepo(args.repo, args.event)
         return res
 
 
 if __name__ == '__main__':
     a = Run()
+    print(a.analyse())
